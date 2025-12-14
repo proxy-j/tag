@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Multiplayer Tag Game</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #111;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // ------------------
+    // Reload detection (client-only)
+    // ------------------
+    const lastLeave = Number(localStorage.getItem('lastLeaveTime') || 0);
+    const now = Date.now();
+
+    if (lastLeave && now - lastLeave < 5000) {
+      alert("Nice try, cheater 😏 Reloading won't save you!");
+    }
+
+    window.addEventListener('beforeunload', () => {
+      localStorage.setItem('lastLeaveTime', Date.now());
+    });
+
+    // ------------------
+    // Game setup
+    // ------------------
+    const socket = io();
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Get or save name
+    let name = localStorage.getItem('playerName');
+    if (!name) {
+      name = prompt('Enter your name:') || 'Anonymous';
+      localStorage.setItem('playerName', name);
+    }
+
+    socket.emit('setName', name);
+
+    let players = {};
+    let taggerId = null;
+
+    socket.on('currentPlayers', (data) => {
+      players = data.players;
+      taggerId = data.taggerId;
+    });
+
+    socket.on('newPlayer', (player) => {
+      players[player.id] = player;
+    });
+
+    socket.on('playerMoved', ({ id, x, y }) => {
+      if (players[id]) {
+        players[id].x = x;
+        players[id].y = y;
+      }
+    });
+
+    socket.on('playerDisconnected', (id) => {
+      delete players[id];
+    });
+
+    socket.on('taggerChanged', (id) => {
+      taggerId = id;
+    });
+
+    // ------------------
+    // Input
+    // ------------------
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    setInterval(() => {
+      let dx = 0, dy = 0;
+      const speed = 5;
+
+      if (keys['ArrowUp'] || keys['w']) dy -= speed;
+      if (keys['ArrowDown'] || keys['s']) dy += speed;
+      if (keys['ArrowLeft'] || keys['a']) dx -= speed;
+      if (keys['ArrowRight'] || keys['d']) dx += speed;
+
+      if (dx !== 0 || dy !== 0) {
+        socket.emit('move', { x: dx, y: dy });
+      }
+    }, 1000 / 60);
+
+    // ------------------
+    // Rendering
+    // ------------------
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (const id in players) {
+        const p = players[id];
+        const isTagger = id === taggerId;
+        const frozen = Date.now() < p.frozenUntil;
+
+        ctx.beginPath();
+        ctx.fillStyle = isTagger ? 'red' : (frozen ? 'gray' : p.color);
+        ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'white';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.name, p.x, p.y - 20);
+
+        if (id === taggerId) {
+          ctx.fillText('IT', p.x, p.y + 30);
+        }
+      }
+
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  </script>
+</body>
+</html>
